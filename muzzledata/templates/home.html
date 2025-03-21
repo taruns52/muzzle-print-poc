@@ -1,0 +1,83 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Muzzle Print Verification</title>
+    <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body>
+    <div class="container">
+        <h1>Muzzle Print Verification</h1>
+
+        <!-- Container for both forms side by side -->
+        <div class="form-container">
+            <!-- Save Cow Data Form -->
+            <div class="form-section">
+                <form id="save-form" action="{% url 'save_cow_data' %}" method="POST" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    
+                    <!-- Cow image upload -->
+                    <input type="file" name="cow_image" id="cow_image_save" required onchange="previewImage(event, 'save')"><br><br>
+
+                    <!-- Cow name field -->
+                    <input type="text" name="cow_name" id="cow_name" placeholder="Enter Cow Name" required><br><br>
+                    
+                    <button type="submit" name="save_cow_data">Upload</button>
+                </form>
+
+                <!-- Image Preview for Save Form -->
+                <div id="image-preview-container-save" style="display:none;">
+                    <h2>Uploaded Image for Save Form:</h2>
+                    <img id="image-preview-save" src="" alt="Uploaded Image" style="max-width: 100%; height: auto;">
+                </div>
+            </div>
+
+            <!-- Verification Form -->
+            <div class="form-section">
+                <form id="verify-form" action="{% url 'muzzle_verification' %}" method="POST" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    
+                    <!-- Cow image upload for verification -->
+                    <label for="cow_image_verify">Verify Cow Data:</label><br>
+                    <input type="file" name="cow_image" id="cow_image_verify" required onchange="previewImage(event, 'verify')"><br><br>
+
+                    <button type="submit" name="verify_cow_data">Verify</button>
+                </form>
+
+                <!-- Image Preview for Verify Form -->
+                <div id="image-preview-container-verify" style="display:none;">
+                    <h2>Uploaded Image for Verify Form:</h2>
+                    <img id="image-preview-verify" src="" alt="Uploaded Image" style="max-width: 100%; height: auto;">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Function to show the uploaded image preview
+        function previewImage(event, formType) {
+            const file = event.target.files[0];
+            if (file) {
+                // Create a URL for the image file
+                const objectURL = URL.createObjectURL(file);
+
+                // Determine which form's preview to show
+                if (formType === 'save') {
+                    const imagePreview = document.getElementById('image-preview-save');
+                    const imagePreviewContainer = document.getElementById('image-preview-container-save');
+                    imagePreview.src = objectURL;
+                    imagePreviewContainer.style.display = 'block';
+                } else if (formType === 'verify') {
+                    const imagePreview = document.getElementById('image-preview-verify');
+                    const imagePreviewContainer = document.getElementById('image-preview-container-verify');
+                    imagePreview.src = objectURL;
+                    imagePreviewContainer.style.display = 'block';
+                }
+            }
+        }
+    </script>
+</body>
+</html>
