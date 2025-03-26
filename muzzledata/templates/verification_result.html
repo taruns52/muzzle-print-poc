@@ -1,0 +1,28 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verification Result</title>
+    <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body>
+    <div class="container">
+        {% if status == "success" %}
+            <h1>Match Found!</h1>
+            <p><strong>Cow Name:</strong> {{ cow_name }}</p>
+            <img src="{{ request.GET.cow_image_url }}" alt="Matched Cow Image" width="300">
+        {% else %}
+            <h1>Error</h1>
+            <p>{{ request.GET.message }}</p>
+        {% endif %}
+        <br>
+        
+        <a href="{% url 'verify_cow_data' %}">Try Again</a><br><br>
+
+        <!-- Home Button -->
+        <a href="{% url 'home' %}" class="btn">Home</a>
+    </div>
+</body>
+</html>

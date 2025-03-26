@@ -1,0 +1,73 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Cow Data</title>
+    <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body>
+    <div class="container">
+        <h1>Verify Cow Data</h1>
+
+        <!-- Video preview for camera -->
+        <div id="camera-preview">
+            <video id="video" width="640" height="480" autoplay playsinline muted></video>
+            <button id="capture-btn">Capture Image</button>
+        </div>
+        
+        <!-- Image preview after capture -->
+        <div id="image-preview-container" style="display:none;">
+            <img id="image-preview" width="640" height="480" alt="Captured Image">
+        </div>
+
+        <!-- Form for submitting captured image -->
+        <form id="verify-form" action="{% url 'verify_cow_data' %}" method="POST">
+            {% csrf_token %}
+            <input type="hidden" name="cow_image" id="cow_image_verify">
+            <button type="submit">Verify</button>
+        </form>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('video');
+        const captureButton = document.getElementById('capture-btn');
+        const imagePreviewContainer = document.getElementById('image-preview-container');
+        const imagePreview = document.getElementById('image-preview');
+        const form = document.getElementById('verify-form');
+        const cowImageInput = document.getElementById('cow_image_verify');
+
+        // Initialize camera
+        navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: "environment" } }
+            })
+            .then(stream => { videoElement.srcObject = stream; })
+            .catch(err => {
+                console.error("Camera error:", err);
+                alert("Camera access not available. Please check permissions.");
+            });
+
+        // Capture image and set to hidden input field
+        captureButton.addEventListener('click', function() {
+            videoElement.pause();
+
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = videoElement.videoWidth;
+            canvas.height = videoElement.videoHeight;
+            context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+
+            const dataUrl = canvas.toDataURL('image/jpeg');
+            cowImageInput.value = dataUrl;
+
+            imagePreview.src = dataUrl;
+            imagePreviewContainer.style.display = 'block';
+
+            videoElement.style.display = 'none';
+            captureButton.style.display = 'none';
+        });
+    </script>
+</body>
+</html>
