@@ -66,8 +66,8 @@ class MuzzleVerificationView(View):
         cow_image_data = request.POST.get('cow_image')
 
         if not cow_image_data:
-            print(f"{log_label} No image uploaded.")
             error_message = "No image uploaded."
+            print(f"{log_label} Validation Failed: {error_message}")
             query_params = urlencode({'message': error_message})
             return redirect(f"/verification-result/error/Unknown/?{query_params}")
 
@@ -84,21 +84,23 @@ class MuzzleVerificationView(View):
 
             if uploaded_encoding is None or uploaded_encoding.size == 0:
                 error_message = "No muzzle detected in the uploaded image."
+                print(f"{log_label} Validation Failed: {error_message}")
                 query_params = urlencode({'message': error_message})
                 return redirect(f"/verification-result/error/Unknown/?{query_params}")
                 
             matching_cow = verify_encoding(uploaded_encoding)
-
             
             if matching_cow:
-                cow_name = matching_cow.cow_name.replace(" ", "_")  # Replace spaces with underscores
+                cow_name = matching_cow.cow_name
                 cow_image_url = matching_cow.cow_image.url  # Get the image URL
 
+                print(f"{log_label} Match Found Successfully! with cow_name : {cow_name}")
                 # Redirect with query parameters
                 query_params = urlencode({'cow_image_url': cow_image_url})
                 return redirect(f"/verification-result/success/{cow_name}/?{query_params}")
             else:
                 error_message = "No matching muzzle print found."
+                print(f"{log_label} Validation Failed: {error_message}")
                 query_params = urlencode({'message': error_message})
                 return redirect(f"/verification-result/error/Unknown/?{query_params}")
 

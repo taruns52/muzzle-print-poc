@@ -14,7 +14,7 @@
             <p><strong>Cow Name:</strong> {{ cow_name }}</p>
             <img src="{{ request.GET.cow_image_url }}" alt="Matched Cow Image" width="300">
         {% else %}
-            <h1>Error</h1>
+            <h1>Verification Failed</h1>
             <p>{{ request.GET.message }}</p>
         {% endif %}
         <br>
