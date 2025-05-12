@@ -8,7 +8,7 @@ from muzzledata.models import Cow
 # Load the pre-trained YOLO model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
 model = YOLO('trained_model_new.pt')
 
-def generate_encoding(image_file, output_folder):
+def generate_encoding(image_file, output_folder, confidence_threshold=0.7):
     try:
         if image_file is None:
             print("Failed to decode the image")
@@ -18,68 +18,86 @@ def generate_encoding(image_file, output_folder):
         results = model(image_file) 
 
         # Ensure bounding boxes exist
-        if not results[0].boxes or len(results[0].boxes) == 0:
+        if not results or not results[0].boxes or len(results[0].boxes) == 0:
             print("No muzzle detected")
-            return None
+            return None, None
 
-        # Extract the bounding box coordinates
-        x1, y1, x2, y2 = map(int, results[0].boxes.xyxy[0].cpu().numpy())
+        boxes = results[0].boxes.xyxy.cpu().numpy()
+        confidences = results[0].boxes.conf.cpu().numpy()
 
-        # Crop the muzzle region
-        muzzle_image = image_file[y1:y2, x1:x2]
+        for i, conf in enumerate(confidences):
+            if conf >= confidence_threshold:
+                x1, y1, x2, y2 = map(int, boxes[i])
+                muzzle_image = image_file[y1:y2, x1:x2]
 
-        # Convert the cropped muzzle region to grayscale for ORB processing
-        gray_muzzle = cv2.cvtColor(muzzle_image, cv2.COLOR_BGR2GRAY)
+                if muzzle_image.size == 0:
+                    continue
 
-        # Save cropped muzzle image
-        output_folder = os.path.join(settings.MEDIA_ROOT, output_folder)
-        os.makedirs(output_folder, exist_ok=True)
-        cropped_image_path = os.path.join(output_folder, "cropped_muzzle.png")
-        cv2.imwrite(cropped_image_path, gray_muzzle)
+                # Save cropped image to bytes
+                success, buffer = cv2.imencode(".jpg", muzzle_image)
+                cropped_image_bytes = buffer.tobytes() if success else None
 
-        print(f"Cropped image saved at: {cropped_image_path}")
+                # Generate SIFT descriptors
+                gray_muzzle = cv2.cvtColor(muzzle_image, cv2.COLOR_BGR2GRAY)
+                sift = cv2.SIFT_create()
+                keypoints, descriptors = sift.detectAndCompute(gray_muzzle, None)
 
-        # Generate ORB descriptors for feature matching
-        orb = cv2.ORB_create()
-        keypoints, descriptors = orb.detectAndCompute(gray_muzzle, None)
+                if descriptors is None:
+                    return None, None
 
-        if descriptors is None:
-            print("No key features found in muzzle print")
-            return None
+                return descriptors, cropped_image_bytes
 
-        return descriptors  # Return ORB descriptors for further processing
+        return None, None
 
     except Exception as e:
         print(f"An error occurred during encoding generation: {e}")
         return None
 
 
+def compare_encodings(descriptors1, descriptors2):
+    try:
+        bf = cv2.BFMatcher()
+        matches = bf.knnMatch(descriptors1, descriptors2, k=2)
+
+        good_matches = []
+
+        for m, n in matches:
+            if m.distance < 0.75 * n.distance:
+                good_matches.append(m)
+
+        return len(good_matches)
+
+    except Exception as e:
+        print(f"Error in compare_encodings: {e}")
+        return 0
+    
+
 def verify_encoding(uploaded_encoding):
     # Load all cows from database
-    cows = Cow.objects.all()
-
-    # Initialize ORB matcher
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    cows = Cow.objects.filter(cow_encoding__isnull= False)
 
     best_match = None
-    max_matches = 0
-    match_threshold = 30
+    best_score = 0
+    threshold = 30
 
-    for cow in cows:
-        # Convert stored encoding from bytes to numpy array
-        stored_encoding = np.frombuffer(cow.cow_encoding, dtype=np.uint8).reshape(-1, 32)
+    for entry in cows:
+        stored_descriptors = np.frombuffer(entry.cow_encoding, dtype=np.float32)
 
-        # Use ORB feature matching
-        matches = bf.match(uploaded_encoding, stored_encoding)
+        if stored_descriptors.size % 128 != 0:
+            continue
+
+        stored_descriptors = stored_descriptors.reshape(-1, 128)
+
+        match_score = compare_encodings(uploaded_encoding, stored_descriptors)
         
-        strong_matches = [m for m in matches if m.distance < 50] 
+        if match_score > best_score:
+            best_score = match_score
+            best_match = entry
 
-        if len(strong_matches) > max_matches and len(strong_matches) > match_threshold:
-            max_matches = len(strong_matches)
-            best_match = cow
+        print(f"\n best_score {best_score} best_match {best_match} match_score {match_score}")
 
     # If we have a strong match, return the cow
-    if best_match:  
+    if best_match and best_score >= threshold:
         return best_match
 
     return None  # No match found

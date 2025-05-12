@@ -29,32 +29,33 @@ class SaveCowDataView(View):
         header, encoded = cow_image_base64.split(",", 1)  # Remove "data:image/jpeg;base64,"
         image_data = base64.b64decode(encoded)  #decoded into binary image data
         nparr = np.frombuffer(image_data, np.uint8)
-        cow_image_cv2 = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+        cow_image_cv2 = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
         if cow_image_cv2 is None:
             print(f"{log_label} Error processing image.")
             return HttpResponse("<script>alert('Error processing image.'); window.location.href='/';</script>")
 
         # Process Image with Your Model
-        muzzle_encoding = generate_encoding(cow_image_cv2, 'save_data')
+        descriptors, cropped_image = generate_encoding(cow_image_cv2, 'save_data')
 
-        if muzzle_encoding is None or muzzle_encoding.size == 0:
+        if descriptors is None or len(descriptors) == 0 or cropped_image is None:
             print(f"{log_label} No muzzle detected in the uploaded image")
             return HttpResponse("<script>alert('No muzzle detected in the uploaded image'); window.location.href='/';</script>")
 
         # Save the image to a file (using ContentFile)
-        image_file = ContentFile(image_data)
+        image_file = ContentFile(cropped_image)
         image_file.name = f"{cow_name}.jpg"
 
         # Save to Database 
         Cow.objects.create(
             cow_name=cow_name,
             cow_image=image_file, 
-            cow_encoding=muzzle_encoding
+            cow_encoding=descriptors
         )
 
         print(f"{log_label} Cow data successfully saved!")
         return HttpResponse("<script>alert('Cow data successfully saved!'); window.location.href='/';</script>")
+
 
 class MuzzleVerificationView(View):
     def get(self, request):
@@ -80,15 +81,15 @@ class MuzzleVerificationView(View):
             if cow_image_cv2 is None:
                 raise ValueError("Error in decoding image.")
 
-            uploaded_encoding = generate_encoding(cow_image_cv2, 'verified_data')
+            descriptors, crooped_image_data = generate_encoding(cow_image_cv2, 'verified_data')
 
-            if uploaded_encoding is None or uploaded_encoding.size == 0:
+            if descriptors is None or len(descriptors) == 0 or crooped_image_data is None:
                 error_message = "No muzzle detected in the uploaded image."
                 print(f"{log_label} Validation Failed: {error_message}")
                 query_params = urlencode({'message': error_message})
                 return redirect(f"/verification-result/error/Unknown/?{query_params}")
-                
-            matching_cow = verify_encoding(uploaded_encoding)
+            
+            matching_cow = verify_encoding(descriptors)
             
             if matching_cow:
                 cow_name = matching_cow.cow_name
