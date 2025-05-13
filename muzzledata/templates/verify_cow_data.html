@@ -1,73 +1,127 @@
 {% load static %}
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verify Cow Data</title>
-    <link rel="stylesheet" href="{% static 'styles.css' %}">
+ <meta charset="UTF-8" />
+ <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+ <title>Verify Cow Data</title>
+ <link rel="stylesheet" href="{% static 'styles.css' %}" />
 </head>
 <body>
-    <div class="container">
-        <h1>Verify Cow Data</h1>
+ <div class="container">
+ <h1>Verify Cow Data</h1>
 
-        <!-- Video preview for camera -->
-        <div id="camera-preview">
-            <video id="video" width="640" height="480" autoplay playsinline muted></video>
-            <button id="capture-btn">Capture Image</button>
-        </div>
-        
-        <!-- Image preview after capture -->
-        <div id="image-preview-container" style="display:none;">
-            <img id="image-preview" width="640" height="480" alt="Captured Image">
-        </div>
+ <button id="start-btn">Start Verification</button>
 
-        <!-- Form for submitting captured image -->
-        <form id="verify-form" action="{% url 'verify_cow_data' %}" method="POST">
-            {% csrf_token %}
-            <input type="hidden" name="cow_image" id="cow_image_verify">
-            <button type="submit">Verify</button>
-        </form>
-    </div>
+ <div id="camera-wrapper" style="position:relative; width:640px; height:480px;">
+ <video id="video" width="640" height="480" autoplay muted playsinline></video>
+ <canvas id="overlay" width="640" height="480" style="position:absolute; top:0; left:0;"></canvas>
+ </div>
 
-    <script>
-        const videoElement = document.getElementById('video');
-        const captureButton = document.getElementById('capture-btn');
-        const imagePreviewContainer = document.getElementById('image-preview-container');
-        const imagePreview = document.getElementById('image-preview');
-        const form = document.getElementById('verify-form');
-        const cowImageInput = document.getElementById('cow_image_verify');
+ <p id="status"></p>
+ </div>
 
-        // Initialize camera
-        navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { ideal: "environment" } }
-            })
-            .then(stream => { videoElement.srcObject = stream; })
-            .catch(err => {
-                console.error("Camera error:", err);
-                alert("Camera access not available. Please check permissions.");
-            });
+ <script>
+ const video = document.getElementById("video");
+ const canvas = document.getElementById("overlay");
+ const ctx = canvas.getContext("2d");
+ const startBtn = document.getElementById("start-btn");
+ const statusText = document.getElementById("status");
 
-        // Capture image and set to hidden input field
-        captureButton.addEventListener('click', function() {
-            videoElement.pause();
+ let socket;
+ let stream;
+ let captureInterval;
 
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            canvas.width = videoElement.videoWidth;
-            canvas.height = videoElement.videoHeight;
-            context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+ // Function to stop the camera
+ function stopCamera() {
+ if (stream) {
+ stream.getTracks().forEach(track => track.stop());
+ console.log("Camera stopped.");
+ }
+ }
 
-            const dataUrl = canvas.toDataURL('image/jpeg');
-            cowImageInput.value = dataUrl;
+ // Function to start the camera
+ async function startCamera() {
+ try {
+ console.log("Attempting to access the camera...");
+ stream = await navigator.mediaDevices.getUserMedia({
+ video: { facingMode: { exact: "environment" } },
+ audio: false
+ });
+ console.log("Camera access successful.");
+ video.srcObject = stream;
+ } catch (err) {
+ console.error("Camera Error:", err);
+ statusText.innerText = "❌ Could not access camera. Try another device.";
+ }
+ }
 
-            imagePreview.src = dataUrl;
-            imagePreviewContainer.style.display = 'block';
+ // Function to draw a box on the canvas
+ function drawBox(box, confidence) {
+ const [x1, y1, x2, y2] = box;
+ ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear previous drawings
+ ctx.strokeStyle = "orange";
+ ctx.lineWidth = 3;
+ ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+ ctx.fillStyle = "orange";
+ ctx.font = "20px Arial";
+ ctx.fillText(`Conf: ${confidence.toFixed(2)}`, x1 + 5, y1 + 25);
+ }
 
-            videoElement.style.display = 'none';
-            captureButton.style.display = 'none';
-        });
-    </script>
+ startBtn.addEventListener("click", async () => {
+ console.log("Start button clicked.");
+ socket = new WebSocket(`wss://${window.location.host}/ws/cow/verify/`);
+
+ socket.onopen = async () => {
+ console.log("WebSocket connection opened.");
+ statusText.innerText = "🔄 Connecting camera...";
+ await startCamera();
+ statusText.innerText = "📷 Streaming... Looking for muzzle...";
+
+ captureInterval = setInterval(() => {
+ const capture = document.createElement("canvas");
+ capture.width = video.videoWidth;
+ capture.height = video.videoHeight;
+ capture.getContext("2d").drawImage(video, 0, 0, capture.width, capture.height);
+ const frame = capture.toDataURL("image/jpeg");
+ console.log("Sending frame to server...");
+ socket.send(JSON.stringify({ image: frame }));
+ }, 1000);
+ };
+
+ socket.onmessage = (e) => {
+ console.log("Received WebSocket message:", e.data);
+ const data = JSON.parse(e.data);
+ if (data.box && data.confidence) {
+ drawBox(data.box, data.confidence);
+ }
+
+ if (data.status === "success") {
+ statusText.innerText = `✅ Cow matched: ${data.cow_name}`;
+ clearInterval(captureInterval);
+ socket.close();
+ stopCamera();
+ } else if (data.status === "fail") {
+ statusText.innerText = `❌ No matching cow found.`;
+ } else if (data.status === "error") {
+ statusText.innerText = `❌ Error: ${data.message}`;
+ clearInterval(captureInterval);
+ socket.close();
+ stopCamera();
+ }
+ };
+
+ socket.onerror = (err) => {
+ console.error("WebSocket error:", err);
+ statusText.innerText = "❌ WebSocket error.";
+ clearInterval(captureInterval);
+ stopCamera();
+ };
+
+ socket.onclose = () => {
+ console.log("WebSocket connection closed.");
+ };
+ });
+ </script>
 </body>
 </html>

@@ -2,87 +2,120 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload Cow Data</title>
-    <link rel="stylesheet" href="{% static 'styles.css' %}">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Upload Cow Data</title>
+  <link rel="stylesheet" href="{% static 'styles.css' %}" />
 </head>
 <body>
-    <div class="container">
-        <h1>Upload Cow Data</h1>
+  <div class="container">
+    <h1>Upload Cow Data</h1>
 
-        <!-- Video preview -->
-        <div id="camera-preview">
-            <video id="video" width="640" height="480" autoplay playsinline muted></video>
-            <br>
-            <button id="capture-btn">Capture Image</button><br>
-        </div>
+    <label for="cow_name">Enter Cow Name:</label>
+    <input type="text" id="cow_name" placeholder="Enter Cow Name" required />
+    <button id="start-btn">Start Camera & Upload</button>
 
-        <!-- Image preview after capture -->
-        <div id="image-preview-container" style="display:none;">
-            <img id="image-preview" width="640" height="480" alt="Captured Image">
-        </div>
-
-        <!-- Form for submission -->
-        <form id="save-form" action="{% url 'upload_cow_data' %}" method="POST">
-            {% csrf_token %}
-            <input type="hidden" name="cow_image" id="cow_image">  <!-- Stores image in Base64 format -->
-            <br>
-            <label for="cow_name">Enter Cow Name:</label>
-            <input type="text" name="cow_name" id="cow_name" placeholder="Enter Cow Name" required>
-            <button type="submit">Submit</button>
-        </form>
+    <div id="camera-wrapper" style="position:relative; width:640px; height:480px;">
+      <video id="video" width="640" height="480" autoplay muted playsinline></video>
+      <canvas id="overlay" width="640" height="480" style="position:absolute; top:0; left:0;"></canvas>
     </div>
 
-    <script>
-        const videoElement = document.getElementById('video');
-        const captureButton = document.getElementById('capture-btn');
-        const imagePreviewContainer = document.getElementById('image-preview-container');
-        const imagePreview = document.getElementById('image-preview');
-        const form = document.getElementById('save-form');
-        const cowImageInput = document.getElementById('cow_image');
+    <p id="status"></p>
+  </div>
 
-        // Initialize Camera
-        navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: { ideal: "environment" } // Uses rear camera if available
-                }
-            })
-            .then(stream => {
-                videoElement.srcObject = stream;
-            })
-            .catch(err => {
-                console.error("Camera error:", err);
-                alert("Camera access not available. Please check permissions.");
-            });
+  <script>
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("overlay");
+  const ctx = canvas.getContext("2d");
+  const startBtn = document.getElementById("start-btn");
+  const cowNameInput = document.getElementById("cow_name");
+  const statusText = document.getElementById("status");
 
-        // Capture Image and Convert to Base64
-        captureButton.addEventListener('click', function () {
-            // Pause video to freeze frame
-            videoElement.pause();
+  let socket;
+  let stream;
+  let captureInterval;
 
-            // Create a canvas to capture the image
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            canvas.width = videoElement.videoWidth;
-            canvas.height = videoElement.videoHeight;
-            context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+  function stopCamera() {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+  }
 
-            // Convert to Base64
-            const dataUrl = canvas.toDataURL('image/jpeg'); // Base64 string
-            cowImageInput.value = dataUrl; // Store Base64 in hidden input field
+  async function startCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { exact: "environment" } },
+        audio: false
+      });
+      video.srcObject = stream;
+    } catch (err) {
+      console.error("Camera Error:", err);
+      statusText.innerText = "❌ Could not access camera. Try another device.";
+    }
+  }
 
-            // Show the captured image
-            imagePreview.src = dataUrl;
-            imagePreviewContainer.style.display = 'block';
+  function drawBox(box, confidence) {
+    const [x1, y1, x2, y2] = box;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "lime";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    ctx.fillStyle = "lime";
+    ctx.font = "20px Arial";
+    ctx.fillText(`Conf: ${confidence.toFixed(2)}`, x1 + 5, y1 + 25);
+  }
 
-            // Hide video and capture button
-            videoElement.style.display = 'none';
-            captureButton.style.display = 'none';
+  startBtn.addEventListener("click", async () => {
+    const cowName = cowNameInput.value.trim();
+    if (!cowName) {
+      alert("Please enter a cow name.");
+      return;
+    }
 
-            // Show form
-            form.style.display = 'block';
-        });
-    </script>
+    // Establish WebSocket immediately
+    socket = new WebSocket(`wss://${window.location.host}/ws/cow/register/`);
+
+    socket.onopen = async () => {
+      statusText.innerText = "🔄 Connecting camera...";
+      await startCamera();
+      statusText.innerText = "📷 Streaming... Looking for muzzle...";
+
+      captureInterval = setInterval(() => {
+        const capture = document.createElement("canvas");
+        capture.width = video.videoWidth;
+        capture.height = video.videoHeight;
+        capture.getContext("2d").drawImage(video, 0, 0, capture.width, capture.height);
+        const frame = capture.toDataURL("image/jpeg");
+        socket.send(JSON.stringify({ image: frame, cow_name: cowName }));
+      }, 1000);
+    };
+
+    socket.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      if (data.box && data.confidence) {
+        drawBox(data.box, data.confidence);
+      }
+
+      if (data.status === "done") {
+        statusText.innerText = `✅ Cow "${cowName}" saved successfully.`;
+        clearInterval(captureInterval);
+        socket.close();
+        stopCamera();
+      } else if (data.status === "error") {
+        statusText.innerText = `❌ Error: ${data.message}`;
+        clearInterval(captureInterval);
+        socket.close();
+        stopCamera();
+      }
+    };
+
+    socket.onerror = (err) => {
+      console.error("WebSocket error:", err);
+      statusText.innerText = "❌ WebSocket error.";
+      clearInterval(captureInterval);
+      stopCamera();
+    };
+  });
+</script>
 </body>
 </html>

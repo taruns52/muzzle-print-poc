@@ -1,26 +1,20 @@
-import os
 import cv2
-from django.conf import settings
 import numpy as np
 from ultralytics import YOLO
-from muzzledata.models import Cow
+from .models import Cow
 
-# Load the pre-trained YOLO model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+# Load the pre-trained YOLO model
 model = YOLO('trained_model_new.pt')
 
 def generate_encoding(image_file, output_folder, confidence_threshold=0.7):
     try:
         if image_file is None:
-            print("Failed to decode the image")
-            return None
+            return None, None, None, None
 
-        # Run YOLO model to detect objects 
-        results = model(image_file) 
+        results = model(image_file)
 
-        # Ensure bounding boxes exist
         if not results or not results[0].boxes or len(results[0].boxes) == 0:
-            print("No muzzle detected")
-            return None, None
+            return None, None, None, None
 
         boxes = results[0].boxes.xyxy.cpu().numpy()
         confidences = results[0].boxes.conf.cpu().numpy()
@@ -33,25 +27,25 @@ def generate_encoding(image_file, output_folder, confidence_threshold=0.7):
                 if muzzle_image.size == 0:
                     continue
 
-                # Save cropped image to bytes
+                # Encode image
                 success, buffer = cv2.imencode(".jpg", muzzle_image)
                 cropped_image_bytes = buffer.tobytes() if success else None
 
-                # Generate SIFT descriptors
+                # Generate SIFT
                 gray_muzzle = cv2.cvtColor(muzzle_image, cv2.COLOR_BGR2GRAY)
                 sift = cv2.SIFT_create()
                 keypoints, descriptors = sift.detectAndCompute(gray_muzzle, None)
 
                 if descriptors is None:
-                    return None, None
+                    return None, None, None, None
 
-                return descriptors, cropped_image_bytes
+                return descriptors, cropped_image_bytes, (x1, y1, x2, y2), float(conf)
 
-        return None, None
+        return None, None, None, None
 
     except Exception as e:
-        print(f"An error occurred during encoding generation: {e}")
-        return None
+        print(f"Encoding error: {e}")
+        return None, None, None, None
 
 
 def compare_encodings(descriptors1, descriptors2):
@@ -74,7 +68,7 @@ def compare_encodings(descriptors1, descriptors2):
 
 def verify_encoding(uploaded_encoding):
     # Load all cows from database
-    cows = Cow.objects.filter(cow_encoding__isnull= False)
+    cows = Cow.objects.filter(cow_encoding__isnull=False)
 
     best_match = None
     best_score = 0
